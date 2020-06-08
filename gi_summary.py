@@ -17,7 +17,7 @@ def main():
 	#read accessions from input table
 	hits = readAccessionTable(params.input, params.col)
 	hits=hits[int(params.headers):] #remove header line
-	print(hits)
+	#print(hits)
 	
 	#filter missing values and track how many there were
 	badchars = ["-"]
@@ -31,6 +31,7 @@ def main():
 	#get counts for each hit
 	hits = sorted(hits)
 	hit_count = Counter(hits)
+	#print(hit_count)
 	hits=hit_count.keys()
 	uniq_count=len(hits)
 	print("Found",str(tot),"total accessions, with",uniq_count,"being unique")
@@ -38,10 +39,23 @@ def main():
 	#initialize table
 	print("Fetching taxon names from accessions...")
 	sci_names=efetchNamesFromAccessions(hits, params.batchSize, params.email, params.time, params.api)
+	#sci_names=efetchNamesFromAccessions(hits, params.email, params.api)
+	sci_fullcount=dict()
+	if len(sci_names) != len(hits):
+		print("ERROR: LENGTH OF sci_names AND hits DON'T MATCH")
+		sys.exit(1)
+	for idx, val in enumerate(hits):
+		#print(idx, val, sci_names[idx])
+		if sci_names[idx] in sci_fullcount:
+			sci_fullcount[sci_names[idx]] += hit_count[val]
+		else:
+			sci_fullcount[sci_names[idx]] = hit_count[val]
+
 	sci_names = sorted(sci_names)
 	
 	#get counts for each species name
 	sci_counts=Counter(sci_names)
+	#print(sci_counts)
 	print("Found",str(len(sci_counts.keys())),"unique taxa represented.")
 	
 	#NCBI query to convert tax names to taxids
@@ -52,8 +66,31 @@ def main():
 	print("Fetching complete taxonomy from taxids...")
 	full_taxonomy=efetchTaxonomyFromTaxid(taxids.values(), params.email, params.api)
 	
-	#final counts
-	#make a dataframe maybe, make sure to keep counts from sci_counts
+	#add in count data
+	for t in sci_counts.keys():
+		full_taxonomy[taxids[t]]["count"]=sci_fullcount[t]
+	df=pd.DataFrame.from_dict(full_taxonomy, orient='index').reset_index()
+	#print(df)
+	#df.to_csv("out.txt", sep="\t", na_rep="NaN")
+	#print(df["kingdom"])
+
+	#summarize outputs
+	#superkingdon, phylum, class, order, family, genus, species
+	summarizeTaxAssigns(df, params.out, "superkingdom", nbad)
+	summarizeTaxAssigns(df, params.out, "phylum", nbad)
+	summarizeTaxAssigns(df, params.out, "family", nbad)
+	summarizeTaxAssigns(df, params.out, "order", nbad)
+	summarizeTaxAssigns(df, params.out, "class", nbad)
+	summarizeTaxAssigns(df, params.out, "genus", nbad)
+
+def summarizeTaxAssigns(dat, out, rank, unassigned=0):
+	rank_counts = dat[["count", rank]].groupby(rank).agg({'count': 'sum'})
+	rank_counts["percent_assigned"] = rank_counts["count"] / rank_counts["count"].sum()
+	rank_counts["percent_all"] = rank_counts["count"] / (rank_counts["count"].sum()+unassigned)
+	#print(rank_counts)
+	oname=out+"_"+rank+".tsv"
+	rank_counts.to_csv(oname, sep="\t", na_rep="NaN")
+	#sys.exit()
 
 def efetchTaxonomyFromTaxid(taxids, email, api=None):
 	ret=dict()
@@ -68,11 +105,11 @@ def efetchTaxonomyFromTaxid(taxids, email, api=None):
 	for t in taxids:
 		search_handle     = Entrez.efetch("taxonomy", id=t, retmode="xml")
 		search_results    = Entrez.read(search_handle)
+		#print(search_results)
 		lineage = {d['Rank']:d['ScientificName'] for d in search_results[0]['LineageEx']}
-		print(lineage)
+		ret[t] = lineage
 		time.sleep(wait)
-		sys.exit()
-	return(taxids)
+	return(ret)
 
 #returns a dict mapping scientific (species) name to taxids
 def efetchTaxidsFromNames(names, email, api=None):
@@ -91,22 +128,43 @@ def efetchTaxidsFromNames(names, email, api=None):
 		search_results    = Entrez.read(search_handle)
 		taxids[t] = search_results['IdList'][0]
 		time.sleep(wait)
-	print(taxids)
+	#print(taxids)
 	return(taxids)
 
+#returns a dict mapping scientific (species) name to taxids
+# def efetchNamesFromAccessions(hits, email, api=None):
+# 	names=list()
+# 
+# 	wait=0.33
+# 	if api:
+# 		wait=0.1
+# 
+# 	#Specify email for Entrex session
+# 	Entrez.email = email
+# 
+# 	#post NCBI query
+# 	for t in hits:
+# 		search_handle     = Entrez.efetch("nucleotide", id=t, retmode="xml")
+# 		search_results    = Entrez.read(search_handle)
+# 		name=search_results[0]["GBSeq_organism"].split(" ")
+# 		nj=name[0] + "+" + name[1]
+# 		names.append(nj)
+# 		time.sleep(wait)
+# 	#print(taxids)
+# 	return(names)
 
 def efetchNamesFromAccessions(hits, batchSize, email, waitTime, api=None):
-	
+
 	sci_names=list()
-	
+
 	#Specify email for Entrex session
 	Entrez.email = email
 
 	#Report how many hits were found
 	if (len(hits) <= 0):
-		print("No accessions found!\n")
+		print("No accessions found!")
 		sys.exit(0)
-	print("Found %s entries! Downloading in batches of %s...\n"%(len(hits), batchSize))
+	print("Found %s entries! Downloading in batches of %s..."%(len(hits), batchSize))
 
 	#post NCBI query
 	#print(hits)
@@ -125,7 +183,7 @@ def efetchNamesFromAccessions(hits, batchSize, email, waitTime, api=None):
 				my_args['api']=api
 			handle = Entrez.efetch(**my_args)
 			records = Entrez.parse(handle)
-	
+
 		except Exception as e:
 			print("Oh no! Unknown exception on batch",count,":",e)
 			count += 1
@@ -158,9 +216,9 @@ class parseArgs():
 	def __init__(self):
 		#Define options
 		try:
-			options, remainder = getopt.getopt(sys.argv[1:], 'i:e:A:t:b:hc:', \
+			options, remainder = getopt.getopt(sys.argv[1:], 'o:i:e:A:t:b:hc:', \
 			["email=","retmax=","batch=","out=", "input=",
-			"help", "time=", "api=", "col=", "headers="])
+			"help", "time=", "api=", "col=", "headers=", "out="])
 		except getopt.GetoptError as err:
 			print(err)
 			self.display_help("\nExiting because getopt returned non-zero exit status.")
@@ -171,7 +229,7 @@ class parseArgs():
 		self.input=None
 		self.retmax=1000000000
 		self.batchSize=500
-		self.out=""
+		self.out="out"
 		self.col=1
 		self.time = 0.5
 		self.headers=1
@@ -233,6 +291,7 @@ class parseArgs():
 		-t,--time	: Time (seconds) to wait between batches (default=0.5)
 		-b,--batch	: Batch size for Entrez queries [default=500]
 		--headers	: Number of header lines to skip (default=1)
+		-o,--out	: Prefix for output files
 		-h,--help	: Displays help menu
 """)
 		sys.exit()
