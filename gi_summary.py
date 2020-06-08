@@ -209,7 +209,14 @@ def readAccessionTable(tab, col):
 		print("Warning: readAccessionTable(): Column number should not be less than 1. Setting to 1.")
 	
 	with open(tab, "r") as acc_lines:
-		return([line.strip().split("\t")[col] for line in acc_lines])
+		ret=list()
+		for line in acc_lines:
+			stuff = line.strip().split("\t")
+			if len(stuff) >= col:
+				ret.append(stuff[col])
+		acc_lines.close()
+		return(ret)
+		#return([line.strip().split("\t")[col] for line in acc_lines if len(line.strip().split("\t") >= col)])
 
 #Object to parse command-line arguments
 class parseArgs():
