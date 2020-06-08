@@ -212,7 +212,7 @@ def readAccessionTable(tab, col):
 		ret=list()
 		for line in acc_lines:
 			stuff = line.strip().split("\t")
-			if len(stuff) >= col:
+			if len(stuff) > col:
 				ret.append(stuff[col])
 		acc_lines.close()
 		return(ret)
