@@ -186,7 +186,6 @@ def efetchNamesFromAccessions(hits, batchSize, email, waitTime, api=None):
 
 		except Exception as e:
 			print("Oh no! Unknown exception on batch",count,":",e)
-			count += 1
 		else:
 			#If no exception, parse records
 			for rec in records:
